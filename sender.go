@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
-	"log"
+	"io/ioutil"
 	"net/http"
 	"os"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -13,9 +16,9 @@ import (
 	"github.com/gorilla/mux"
 )
 
-type Sample struct {
+type Payload struct {
 	Endpoint string   `json:"end_point"`
-	Payload  string   `json:"payload"`
+	Body     string   `json:"body"`
 	Headers  []string `json:"headers"`
 }
 
@@ -23,24 +26,26 @@ var AWS_SECRET_ACCESS_KEY = os.Getenv("AWS_SECRET_ACCESS_KEY")
 var AWS_ACCESS_KEY_ID = os.Getenv("AWS_ACCESS_KEY_ID")
 var AWS_REGION = os.Getenv("AWS_REGION")
 
-func handleRequests() {
-	// creates a new instance of a mux router
+func handleRequests(port int) {
+	log.Infof("Sender started on port %d...", port)
 	myRouter := mux.NewRouter().StrictSlash(true)
-	// replace http.HandleFunc with myRouter.HandleFunc
 	myRouter.HandleFunc("/{queue_name}/{end_point}", sendToSqs)
-	// finally, instead of passing in nil, we want
-	// to pass in our newly created router as the second
-	// argument
-	log.Fatal(http.ListenAndServe(":10000", myRouter))
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), myRouter))
 }
 
 func sendToSqs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	queueName := vars["queue_name"]
 	endPoint := vars["end_point"]
-	var sample1 = Sample{Endpoint: endPoint}
 	w.Header().Set("Content-Type", "application/json")
-	//json.NewEncoder(w).Encode(sample1)
+	body, _ := ioutil.ReadAll(r.Body)
+	_sendToSqs(queueName, endPoint, string(body))
+
+}
+
+func _sendToSqs(queueName string, endPoint string, body string) {
+	log.Infof("Receiving payload with queueName: %s, endPoint: %s, body: %s", queueName, endPoint, body)
+	var incoming = Payload{Endpoint: endPoint, Body: body}
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		Config: aws.Config{Region: aws.String(AWS_REGION)},
 	}))
@@ -53,7 +58,7 @@ func sendToSqs(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err)
 		return
 	}
-	toJson, _ := json.Marshal(sample1)
+	toJson, _ := json.Marshal(incoming)
 	_, err2 := svc.SendMessage(&sqs.SendMessageInput{
 		MessageBody: aws.String(string(toJson)),
 		QueueUrl:    queue.QueueUrl,
@@ -65,6 +70,14 @@ func sendToSqs(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	fmt.Println("Publisher started...")
-	handleRequests()
+	queueName := flag.String("queue_name", "", "the name of the sqs queue")
+	endPoint := flag.String("end_point", "", "webhook endpoint on the target")
+	body := flag.String("body", "", "payload body to send to webhook(if any)")
+	port := flag.Int("port", 10000, "port to start the relay proxy")
+	flag.Parse()
+	if len(*queueName) > 0 && len(*endPoint) > 0 {
+		_sendToSqs(*queueName, *endPoint, *body)
+	} else {
+		handleRequests(*port)
+	}
 }
