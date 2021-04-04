@@ -1,0 +1,30 @@
+[Unit]
+Description=SQS Webhook Sender Service
+ConditionPathExists=/opt/sqs-webhook-sender/sqs-webhook-sender
+After=network.target
+
+[Service]
+Type=simple
+User=sqs-webhook-sender
+Group=sqs-webhook-sender
+LimitNOFILE=1024
+
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+
+WorkingDirectory=/opt/sqs-webhook-sender
+ExecStart=/opt/sqs-webhook-sender/sqs-webhook-sender
+EnvironmentFile=/opt/sqs-webhook-sender/.env
+
+# make sure log directory exists and owned by syslog
+PermissionsStartOnly=true
+ExecStartPre=/bin/mkdir -p /var/log/sqs-webhook-sender
+ExecStartPre=/bin/chown syslog:adm /var/log/sqs-webhook-sender
+ExecStartPre=/bin/chmod 755 /var/log/sqs-webhook-sender
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=sqs-webhook-sender
+
+[Install]
+WantedBy=multi-user.target
